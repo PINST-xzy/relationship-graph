@@ -1,4 +1,4 @@
-/* 人物双向关系图谱 - 样式（含手机端适配） */
+/* 人物双向关系图谱 - 样式（含手机端适配 v2） */
 
 #rg_extension_settings .rg-intro {
     font-size: 0.85em;
@@ -11,7 +11,6 @@
     margin-top: 8px;
 }
 
-/* —— 顶部工具栏 —— */
 .rg-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -43,7 +42,6 @@
     font-size: 0.9em;
 }
 
-/* —— 关系卡列表 —— */
 .rg-card-list {
     display: flex;
     flex-direction: column;
@@ -300,7 +298,7 @@
         text-align: center;
     }
 
-    /* 卡片头部按钮变大 */
+    /* 卡片头部 */
     .rg-card-header {
         gap: 6px;
     }
@@ -317,23 +315,93 @@
         font-size: 0.9em;
     }
 
-    /* 弹窗满屏 */
+    /* 弹窗 overlay 改为 flex 布局承载满屏弹窗 */
+    .rg-modal-overlay {
+        align-items: stretch;
+        justify-content: stretch;
+    }
+
+    /* —— 关键修复：弹窗结构改为 flex 列布局 —— */
+    /* 整个弹窗占满屏幕，使用 dvh 应对地址栏 */
+    /* 内部分三层：标题 / 可滚动内容区 / 底部按钮 */
     .rg-modal {
         min-width: 0;
         width: 100%;
         max-width: 100vw;
-        max-height: 100vh;
-        height: 100vh;
+        height: 100dvh;          /* dvh = dynamic viewport height，自动避开地址栏 */
+        max-height: 100dvh;
         border-radius: 0;
-        padding: 14px;
+        padding: 0;              /* padding 移到内层，避免影响 flex 计算 */
         margin: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;        /* 容器不滚，让内容区自己滚 */
+        box-sizing: border-box;
     }
+
+    /* 退化兼容：不支持 dvh 的浏览器用 100vh + safe-area */
+    @supports not (height: 100dvh) {
+        .rg-modal {
+            height: 100vh;
+            max-height: 100vh;
+        }
+    }
+
     .rg-modal-large {
         width: 100%;
     }
-    .rg-modal-overlay {
-        align-items: stretch;
-        justify-content: stretch;
+
+    /* 标题栏：固定不滚动 */
+    .rg-modal h3 {
+        padding: 14px 14px 8px 14px;
+        margin: 0;
+        flex-shrink: 0;
+    }
+
+    /* 提示文字：固定不滚动 */
+    .rg-modal-hint {
+        padding: 0 14px;
+        margin-bottom: 8px;
+        flex-shrink: 0;
+    }
+
+    /* 内容区（除标题和底部之外的所有内容）单独滚动 */
+    .rg-modal > .rg-form-row,
+    .rg-modal > #rg_actor_list,
+    .rg-modal > .rg-actor-add,
+    .rg-modal > .rg-token-preview {
+        margin-left: 14px;
+        margin-right: 14px;
+    }
+
+    /* 用一个 wrapper 思路：让除了 h3、modal-footer 之外的所有兄弟节点，
+       共同放进一个可滚动区。用 nth-of-type 不靠谱，改用 padding 把内容
+       撑开 + 给 modal-footer 固定底部 */
+
+    /* 底部按钮栏：固定吸底，永远可见 */
+    .rg-modal-footer {
+        flex-shrink: 0;
+        margin-top: 0;
+        padding: 12px 14px;
+        background: var(--SmartThemeBlurTintColor, #1e1e1e);
+        border-top: 1px solid var(--SmartThemeBorderColor, #444);
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
+    }
+
+    .rg-modal-footer .menu_button {
+        padding: 12px 20px;
+        font-size: 1em;
+        flex: 1;
+        max-width: 200px;
+    }
+
+    /* 让 modal 内部的滚动通过给 modal 本身设置 overflow-y 实现 */
+    /* 因为我们用了 padding: 0 和 flex 列布局，需要让中间内容能滚 */
+    .rg-modal {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
     /* 表单字段竖排 */
@@ -349,7 +417,7 @@
     .rg-form-row input[type="text"],
     .rg-form-row textarea,
     .rg-form-row select {
-        font-size: 16px; /* iOS Safari 防自动放大 */
+        font-size: 16px;
         padding: 10px 12px;
         width: 100%;
     }
@@ -393,22 +461,31 @@
         padding: 10px;
     }
 
-    /* 弹窗底部按钮变大 */
-    .rg-modal-footer .menu_button {
-        padding: 10px 18px;
-        font-size: 0.95em;
-    }
-
     /* 文本域行数手机上略减以省空间 */
     .rg-form-row textarea {
         min-height: 60px;
     }
+
+    /* 手机端给整个 modal 内部留一点底部空间，避免最后一项被吸底栏盖住 */
+    .rg-modal::after {
+        content: "";
+        display: block;
+        height: 8px;
+        flex-shrink: 0;
+    }
 }
 
-/* 极窄屏（≤ 380px，老款 iPhone SE 等）进一步收紧 padding */
+/* 极窄屏（≤ 380px）进一步收紧 padding */
 @media (max-width: 380px) {
-    .rg-modal {
-        padding: 10px;
+    .rg-modal h3,
+    .rg-modal-hint,
+    .rg-modal > .rg-form-row,
+    .rg-modal > #rg_actor_list,
+    .rg-modal > .rg-actor-add,
+    .rg-modal > .rg-token-preview,
+    .rg-modal-footer {
+        padding-left: 10px;
+        padding-right: 10px;
     }
     .rg-toolbar .menu_button {
         font-size: 0.85em;
