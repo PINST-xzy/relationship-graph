@@ -1,4 +1,4 @@
-/* 人物双向关系图谱 - 样式 */
+/* 人物双向关系图谱 - 样式（含手机端适配） */
 
 #rg_extension_settings .rg-intro {
     font-size: 0.85em;
@@ -11,6 +11,7 @@
     margin-top: 8px;
 }
 
+/* —— 顶部工具栏 —— */
 .rg-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -32,6 +33,7 @@
     padding: 6px 8px;
     background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.2));
     border-radius: 4px;
+    line-height: 1.5;
 }
 
 .rg-empty {
@@ -41,6 +43,7 @@
     font-size: 0.9em;
 }
 
+/* —— 关系卡列表 —— */
 .rg-card-list {
     display: flex;
     flex-direction: column;
@@ -70,6 +73,8 @@
 .rg-card-title {
     font-weight: bold;
     font-size: 1.0em;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .rg-dim-tag {
@@ -113,6 +118,7 @@
     color: var(--SmartThemeBodyColor, #ddd);
 }
 
+/* —— 弹窗（基础） —— */
 .rg-modal-overlay {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -134,6 +140,7 @@
     overflow-y: auto;
     color: var(--SmartThemeBodyColor, #fff);
     backdrop-filter: blur(10px);
+    box-sizing: border-box;
 }
 
 .rg-modal-large {
@@ -163,6 +170,7 @@
     gap: 8px;
 }
 
+/* —— 角色名册 —— */
 .rg-actor-row {
     display: flex;
     align-items: center;
@@ -204,6 +212,7 @@
     border-radius: 3px;
 }
 
+/* —— 关系卡编辑器 —— */
 .rg-form-row {
     margin-bottom: 12px;
     display: flex;
@@ -241,6 +250,7 @@
     border-radius: 3px;
     font-family: inherit;
     font-size: 0.9em;
+    box-sizing: border-box;
 }
 
 .rg-form-row textarea {
@@ -271,4 +281,137 @@
 #rg_token_count {
     font-weight: bold;
     color: var(--SmartThemeBodyColor, #ddd);
+}
+
+/* ============================================================ */
+/* 手机端适配（屏幕宽度 ≤ 768px）                              */
+/* ============================================================ */
+@media (max-width: 768px) {
+
+    /* 工具栏按钮变大、易点 */
+    .rg-toolbar {
+        gap: 8px;
+    }
+    .rg-toolbar .menu_button {
+        font-size: 0.9em;
+        padding: 8px 12px;
+        flex: 1 1 auto;
+        min-width: 45%;
+        text-align: center;
+    }
+
+    /* 卡片头部按钮变大 */
+    .rg-card-header {
+        gap: 6px;
+    }
+    .rg-card-header .menu_button {
+        font-size: 0.85em;
+        padding: 6px 10px;
+    }
+    .rg-card-tokens {
+        margin-left: 0;
+        flex-basis: 100%;
+        order: 99;
+    }
+    .rg-toggle {
+        font-size: 0.9em;
+    }
+
+    /* 弹窗满屏 */
+    .rg-modal {
+        min-width: 0;
+        width: 100%;
+        max-width: 100vw;
+        max-height: 100vh;
+        height: 100vh;
+        border-radius: 0;
+        padding: 14px;
+        margin: 0;
+    }
+    .rg-modal-large {
+        width: 100%;
+    }
+    .rg-modal-overlay {
+        align-items: stretch;
+        justify-content: stretch;
+    }
+
+    /* 表单字段竖排 */
+    .rg-form-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+        margin-bottom: 14px;
+    }
+    .rg-form-row label {
+        font-size: 0.95em;
+    }
+    .rg-form-row input[type="text"],
+    .rg-form-row textarea,
+    .rg-form-row select {
+        font-size: 16px; /* iOS Safari 防自动放大 */
+        padding: 10px 12px;
+        width: 100%;
+    }
+    .rg-form-row input[type="number"] {
+        font-size: 16px;
+        padding: 8px 10px;
+        width: 80px !important;
+    }
+
+    /* 角色名册行竖排 */
+    .rg-actor-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+        padding: 10px 0;
+    }
+    .rg-actor-name {
+        min-width: 0;
+        font-size: 1em;
+    }
+    .rg-actor-aliases {
+        font-size: 16px;
+        padding: 8px 10px;
+    }
+    .rg-actor-row .menu_button {
+        align-self: flex-end;
+        padding: 6px 12px;
+    }
+
+    /* 角色添加区竖排 */
+    .rg-actor-add {
+        flex-direction: column;
+    }
+    .rg-actor-add input {
+        font-size: 16px;
+        padding: 10px 12px;
+        min-width: 0;
+        width: 100%;
+    }
+    .rg-actor-add .menu_button {
+        padding: 10px;
+    }
+
+    /* 弹窗底部按钮变大 */
+    .rg-modal-footer .menu_button {
+        padding: 10px 18px;
+        font-size: 0.95em;
+    }
+
+    /* 文本域行数手机上略减以省空间 */
+    .rg-form-row textarea {
+        min-height: 60px;
+    }
+}
+
+/* 极窄屏（≤ 380px，老款 iPhone SE 等）进一步收紧 padding */
+@media (max-width: 380px) {
+    .rg-modal {
+        padding: 10px;
+    }
+    .rg-toolbar .menu_button {
+        font-size: 0.85em;
+        padding: 7px 8px;
+    }
 }
