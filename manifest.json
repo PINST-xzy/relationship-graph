@@ -1,0 +1,12 @@
+{
+    "display_name": "人物双向关系图谱",
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "user",
+    "version": "0.1.0",
+    "homePage": "",
+    "auto_update": false
+}
