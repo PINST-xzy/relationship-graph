@@ -474,7 +474,14 @@
         flex-shrink: 0;
     }
 }
-
+/* 字段提示文字（写作规则说明） */
+.rg-hint {
+    font-size: 0.78em;
+    color: var(--SmartThemeQuoteColor, #888);
+    font-weight: normal;
+    margin-left: 6px;
+    font-style: italic;
+}
 /* 极窄屏（≤ 380px）进一步收紧 padding */
 @media (max-width: 380px) {
     .rg-modal h3,
