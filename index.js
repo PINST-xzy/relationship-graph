@@ -1,16 +1,52 @@
+/**
+ * 人物双向关系图谱 - SillyTavern 扩展
+ * 
+ * 核心理念：
+ * - 数据绑定到当前角色卡（不污染其他 RP）
+ * - 双向关系卡 + 共享信息差 + 维度拆分
+ * - 自动同步到一个专属 World Info（Lorebook）作为注入通道
+ * 
+ * 字段结构（与设计稿一致）：
+ * - 信息差（共享）：A 知 B 不知 / B 知 A 不知 / 互不知
+ * - 认知（单边）：A→B 怎么定义 B / B→A 怎么定义 A
+ * - 互动（单边）：行为模式 [user 相关卡此字段可空]
+ * - 近况（单边）：最近一次显著互动 + 时间锚点
+ */
+
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced, characters, this_chid, eventSource, event_types } from "../../../../script.js";
 import { loadWorldInfo, saveWorldInfo, createNewWorldInfo } from "../../../world-info.js";
 
 const MODULE_NAME = "relationship_graph";
-const LOREBOOK_PREFIX = "RG_";
-const DEFAULT_DEPTH = 4;
+const LOREBOOK_PREFIX = "RG_"; // 自动生成的 Lorebook 前缀
+const DEFAULT_DEPTH = 4;       // World Info 注入深度（@D 4）
 const DEFAULT_PROBABILITY = 100;
 
 // ============================================================
 // 数据结构
 // ============================================================
 
+/**
+ * 默认设置（按当前角色卡存储）
+ * 结构：
+ *   {
+ *     characters: { [name]: { aliases: [...] } },  // 角色名册
+ *     cards: [
+ *       {
+ *         id: "uuid",
+ *         actorA: "贺涵", actorB: "徐依一",
+ *         dimension: "" | "工作" | "情感" | ...,    // 多卡拆分用
+ *         infoGap: "...",
+ *         a2b: { baseline, position, interaction, recent },
+ *         b2a: { baseline, position, interaction, recent },
+ *         enabled: true,
+ *         depth: 4,
+ *         probability: 100,
+ *         updatedAt: timestamp
+ *       }
+ *     ]
+ *   }
+ */
 function getCharData() {
     const charId = this_chid;
     if (charId === undefined || charId === null) return null;
@@ -20,6 +56,7 @@ function getCharData() {
     }
     const root = extension_settings[MODULE_NAME];
 
+    // 用角色卡的 avatar 文件名作为 key（比 chid 稳定）
     const charKey = characters[charId]?.avatar || `chid_${charId}`;
     if (!root[charKey]) {
         root[charKey] = { characters: {}, cards: [] };
@@ -55,6 +92,7 @@ function removeActor(name) {
     const ctx = getCharData();
     if (!ctx) return;
     delete ctx.data.characters[name];
+    // 同时删除涉及该角色的所有卡片
     ctx.data.cards = ctx.data.cards.filter(c => c.actorA !== name && c.actorB !== name);
     saveData();
 }
@@ -84,14 +122,27 @@ function createCard(card) {
         actorA: "", actorB: "",
         dimension: "",
         infoGap: "",
-        a2b: { cognition: "", interaction: "", recent: "" },
-        b2a: { cognition: "", interaction: "", recent: "" },
+        // 字段说明（写作规则）：
+        // baseline (底色): 沉淀式生长。多层情绪/记忆/印象，用 + 号连接，从早到近排序。
+        // position (定位): 切换式。当前应对模式。用 / 号连接的引导性短语（带方向感，非定义）。
+        // interaction (互动): 行为模式。可与好感度卡分工，user 相关卡可空。
+        // recent (近况): 替换式。最近一次显著互动 + 时间锚点。
+        a2b: { baseline: "", position: "", interaction: "", recent: "" },
+        b2a: { baseline: "", position: "", interaction: "", recent: "" },
         enabled: true,
         depth: DEFAULT_DEPTH,
         probability: DEFAULT_PROBABILITY,
         updatedAt: Date.now(),
         ...card
     };
+    // 数据迁移：旧版本只有 cognition 字段
+    for (const side of ["a2b", "b2a"]) {
+        if (newCard[side].cognition !== undefined && !newCard[side].position) {
+            newCard[side].position = newCard[side].cognition;
+            delete newCard[side].cognition;
+        }
+        if (newCard[side].baseline === undefined) newCard[side].baseline = "";
+    }
     ctx.data.cards.push(newCard);
     saveData();
     return newCard;
@@ -120,11 +171,12 @@ function getAllCards() {
 }
 
 // ============================================================
-// token 估算
+// token 估算（粗略：中文 1.5 字/token，英文 4 字符/token）
 // ============================================================
 
 function estimateTokens(text) {
     if (!text) return 0;
+    // 简单估算：中文字符 / 1.5 + 其他字符 / 4
     let chinese = 0, other = 0;
     for (const ch of text) {
         if (/[\u4e00-\u9fff]/.test(ch)) chinese++;
@@ -143,15 +195,23 @@ function renderCardToText(card) {
         lines.push(card.infoGap.trim());
         lines.push("");
     }
+    // 兼容旧数据：cognition → position
+    const sideA = card.a2b || {};
+    const sideB = card.b2a || {};
+    const posA = sideA.position ?? sideA.cognition ?? "";
+    const posB = sideB.position ?? sideB.cognition ?? "";
+
     lines.push(`[${card.actorA} → ${card.actorB}]`);
-    if (card.a2b.cognition?.trim()) lines.push(`认知：${card.a2b.cognition.trim()}`);
-    if (card.a2b.interaction?.trim()) lines.push(`互动：${card.a2b.interaction.trim()}`);
-    if (card.a2b.recent?.trim()) lines.push(`近况：${card.a2b.recent.trim()}`);
+    if (sideA.baseline?.trim()) lines.push(`底色：${sideA.baseline.trim()}`);
+    if (posA?.trim()) lines.push(`定位：${posA.trim()}`);
+    if (sideA.interaction?.trim()) lines.push(`互动：${sideA.interaction.trim()}`);
+    if (sideA.recent?.trim()) lines.push(`近况：${sideA.recent.trim()}`);
     lines.push("");
     lines.push(`[${card.actorB} → ${card.actorA}]`);
-    if (card.b2a.cognition?.trim()) lines.push(`认知：${card.b2a.cognition.trim()}`);
-    if (card.b2a.interaction?.trim()) lines.push(`互动：${card.b2a.interaction.trim()}`);
-    if (card.b2a.recent?.trim()) lines.push(`近况：${card.b2a.recent.trim()}`);
+    if (sideB.baseline?.trim()) lines.push(`底色：${sideB.baseline.trim()}`);
+    if (posB?.trim()) lines.push(`定位：${posB.trim()}`);
+    if (sideB.interaction?.trim()) lines.push(`互动：${sideB.interaction.trim()}`);
+    if (sideB.recent?.trim()) lines.push(`近况：${sideB.recent.trim()}`);
     return lines.join("\n");
 }
 
@@ -163,6 +223,11 @@ function estimateCardTokens(card) {
 // World Info 同步
 // ============================================================
 
+/**
+ * 把当前角色卡的所有关系卡同步到一个专属 Lorebook
+ * Lorebook 名称：RG_<角色名>
+ * 每张卡 → 一个 entry，双关键词 AND 触发
+ */
 async function syncToWorldInfo() {
     const ctx = getCharData();
     if (!ctx) {
@@ -183,8 +248,10 @@ async function syncToWorldInfo() {
         wi = await loadWorldInfo(lorebookName);
     }
 
+    // 清空现有 entries（我们用插件做唯一数据源）
     wi.entries = {};
 
+    // 为每张启用的卡片生成 entry
     let entryUid = 0;
     for (const card of ctx.data.cards) {
         if (!card.enabled) continue;
@@ -193,6 +260,10 @@ async function syncToWorldInfo() {
         const keysA = getActorAliases(card.actorA);
         const keysB = getActorAliases(card.actorB);
 
+        // ST 的 Selective + secondary keys 实现 AND 逻辑
+        // primary keys = A 的所有别名（任一命中）
+        // secondary keys = B 的所有别名（任一命中）
+        // selective = true → 必须 secondary 也命中
         const dimensionTag = card.dimension ? `[${card.dimension}]` : "";
         const comment = `${card.actorA} × ${card.actorB} ${dimensionTag}`.trim();
 
@@ -204,9 +275,9 @@ async function syncToWorldInfo() {
             content: renderCardToText(card),
             constant: false,
             selective: true,
-            selectiveLogic: 0,
+            selectiveLogic: 0, // AND ANY
             order: 100,
-            position: 4,
+            position: 4,       // @D (in chat at depth)
             depth: card.depth ?? DEFAULT_DEPTH,
             probability: card.probability ?? DEFAULT_PROBABILITY,
             useProbability: true,
@@ -259,6 +330,7 @@ function importData(jsonStr) {
         }
         const ctx = getCharData();
         if (!ctx) return;
+        // 合并策略：用导入数据覆盖
         ctx.data.characters = parsed.characters;
         ctx.data.cards = parsed.cards;
         saveData();
@@ -284,6 +356,7 @@ function renderUI() {
         return;
     }
 
+    // —— 顶部工具栏 ——
     const $toolbar = $(`
         <div class="rg-toolbar">
             <button class="menu_button" id="rg_btn_new_card">＋ 新建关系卡</button>
@@ -296,20 +369,26 @@ function renderUI() {
     `);
     $panel.append($toolbar);
 
+    // —— 关系卡列表 ——
     const $list = $(`<div class="rg-card-list"></div>`);
     const cards = ctx.data.cards;
 
     if (cards.length === 0) {
         $list.append(`<div class="rg-empty">还没有关系卡。点"角色名册"先添加几个角色，再点"新建关系卡"。</div>`);
     } else {
+        // 总 token 预估
         const totalTokens = cards.filter(c => c.enabled).reduce((sum, c) => sum + estimateCardTokens(c), 0);
-        const maxTokens = cards.length ? Math.max(...cards.map(estimateCardTokens)) : 0;
-        $list.append(`<div class="rg-stats">已启用关系卡 ${cards.filter(c => c.enabled).length} / ${cards.length} ｜ 总 token 约 ${totalTokens}（仅同时触发时占用，单卡最多约 ${maxTokens}）</div>`);
+        $list.append(`<div class="rg-stats">已启用关系卡 ${cards.filter(c => c.enabled).length} / ${cards.length} ｜ 总 token 约 ${totalTokens}（仅同时触发时占用，单卡最多约 ${cards.length ? Math.max(...cards.map(estimateCardTokens)) : 0}）</div>`);
 
         for (const card of cards) {
             const tokens = estimateCardTokens(card);
             const dimTag = card.dimension ? `<span class="rg-dim-tag">${card.dimension}</span>` : "";
             const enabledClass = card.enabled ? "" : "rg-disabled";
+            // 兼容旧数据
+            const a2bPos = card.a2b?.position ?? card.a2b?.cognition ?? "";
+            const b2aPos = card.b2a?.position ?? card.b2a?.cognition ?? "";
+            const a2bBase = card.a2b?.baseline ?? "";
+            const b2aBase = card.b2a?.baseline ?? "";
             const $card = $(`
                 <div class="rg-card ${enabledClass}" data-id="${card.id}">
                     <div class="rg-card-header">
@@ -324,8 +403,10 @@ function renderUI() {
                     </div>
                     <div class="rg-card-preview">
                         ${card.infoGap ? `<div><b>信息差：</b>${escapeHtml(truncate(card.infoGap, 80))}</div>` : ""}
-                        <div><b>${card.actorA}→${card.actorB}：</b>${escapeHtml(truncate(card.a2b.cognition, 60))}</div>
-                        <div><b>${card.actorB}→${card.actorA}：</b>${escapeHtml(truncate(card.b2a.cognition, 60))}</div>
+                        ${a2bBase ? `<div><b>${card.actorA}底色：</b>${escapeHtml(truncate(a2bBase, 80))}</div>` : ""}
+                        <div><b>${card.actorA}→${card.actorB}：</b>${escapeHtml(truncate(a2bPos, 60))}</div>
+                        ${b2aBase ? `<div><b>${card.actorB}底色：</b>${escapeHtml(truncate(b2aBase, 80))}</div>` : ""}
+                        <div><b>${card.actorB}→${card.actorA}：</b>${escapeHtml(truncate(b2aPos, 60))}</div>
                     </div>
                 </div>
             `);
@@ -335,6 +416,7 @@ function renderUI() {
 
     $panel.append($list);
 
+    // —— 事件绑定 ——
     $("#rg_btn_new_card").on("click", () => openCardEditor(null));
     $("#rg_btn_manage_actors").on("click", openActorManager);
     $("#rg_btn_sync").on("click", syncToWorldInfo);
@@ -472,14 +554,22 @@ function openCardEditor(cardId) {
     if (cardId) {
         card = ctx.data.cards.find(c => c.id === cardId);
         if (!card) return;
+        // 兼容旧数据：cognition → position；补 baseline 默认空
+        for (const side of ["a2b", "b2a"]) {
+            if (card[side]?.cognition !== undefined && !card[side]?.position) {
+                card[side].position = card[side].cognition;
+                delete card[side].cognition;
+            }
+            if (card[side] && card[side].baseline === undefined) card[side].baseline = "";
+        }
     } else {
         card = {
             id: null,
             actorA: actors[0], actorB: actors[1],
             dimension: "",
             infoGap: "",
-            a2b: { cognition: "", interaction: "", recent: "" },
-            b2a: { cognition: "", interaction: "", recent: "" },
+            a2b: { baseline: "", position: "", interaction: "", recent: "" },
+            b2a: { baseline: "", position: "", interaction: "", recent: "" },
             enabled: true,
             depth: DEFAULT_DEPTH,
             probability: DEFAULT_PROBABILITY,
@@ -494,45 +584,57 @@ function openCardEditor(cardId) {
         <div class="rg-modal-overlay">
             <div class="rg-modal rg-modal-large">
                 <h3>${cardId ? "编辑" : "新建"}关系卡</h3>
+                
                 <div class="rg-form-row">
                     <label>角色 A：</label>
                     <select id="rg_edit_actorA">${actorOptions(card.actorA)}</select>
                     <label>角色 B：</label>
                     <select id="rg_edit_actorB">${actorOptions(card.actorB)}</select>
                 </div>
+
                 <div class="rg-form-row">
                     <label>维度（可空，用于同一对人物多卡拆分）：</label>
                     <input type="text" id="rg_edit_dimension" value="${escapeHtml(card.dimension)}" placeholder="例：工作 / 情感 / 家庭">
                 </div>
+
                 <div class="rg-form-row rg-form-block">
                     <label>【信息差】共享内容</label>
                     <textarea id="rg_edit_infoGap" rows="4" placeholder="A 知 B 不知：...&#10;B 知 A 不知：...&#10;互不知：...">${escapeHtml(card.infoGap)}</textarea>
                 </div>
+
                 <div class="rg-form-row rg-form-block">
                     <label class="rg-form-section">[A → B] <span id="rg_label_a2b"></span></label>
-                    <label>认知：</label>
-                    <textarea id="rg_edit_a2b_cog" rows="2">${escapeHtml(card.a2b.cognition)}</textarea>
-                    <label>互动（user 相关卡可空）：</label>
-                    <textarea id="rg_edit_a2b_int" rows="2">${escapeHtml(card.a2b.interaction)}</textarea>
-                    <label>近况（带时间锚点）：</label>
-                    <textarea id="rg_edit_a2b_rec" rows="2">${escapeHtml(card.a2b.recent)}</textarea>
+                    <label>底色 <span class="rg-hint">沉淀式生长。多层情绪/记忆/印象，用 + 号连接，从早到近排序。</span></label>
+                    <textarea id="rg_edit_a2b_base" rows="2" placeholder="例：少女时代的惊艳深埋 + 重逢后被无视的微妙不甘 + 工作场合的克制专业">${escapeHtml(card.a2b.baseline || "")}</textarea>
+                    <label>定位 <span class="rg-hint">切换式。当前应对模式。用 / 号连接的引导性短语（带方向感、非定义）。</span></label>
+                    <textarea id="rg_edit_a2b_pos" rows="2" placeholder="例：基层联络员（松动中）/ 还在以工具性视角看她">${escapeHtml(card.a2b.position || "")}</textarea>
+                    <label>互动 <span class="rg-hint">行为模式。user 相关卡可空（由好感度卡接管）。</span></label>
+                    <textarea id="rg_edit_a2b_int" rows="2">${escapeHtml(card.a2b.interaction || "")}</textarea>
+                    <label>近况 <span class="rg-hint">替换式。最近一次显著互动 + 时间锚点。</span></label>
+                    <textarea id="rg_edit_a2b_rec" rows="2">${escapeHtml(card.a2b.recent || "")}</textarea>
                 </div>
+
                 <div class="rg-form-row rg-form-block">
                     <label class="rg-form-section">[B → A] <span id="rg_label_b2a"></span></label>
-                    <label>认知：</label>
-                    <textarea id="rg_edit_b2a_cog" rows="2">${escapeHtml(card.b2a.cognition)}</textarea>
-                    <label>互动（user 相关卡可空）：</label>
-                    <textarea id="rg_edit_b2a_int" rows="2">${escapeHtml(card.b2a.interaction)}</textarea>
-                    <label>近况（带时间锚点）：</label>
-                    <textarea id="rg_edit_b2a_rec" rows="2">${escapeHtml(card.b2a.recent)}</textarea>
+                    <label>底色 <span class="rg-hint">沉淀式生长。多层情绪/记忆/印象，用 + 号连接，从早到近排序。</span></label>
+                    <textarea id="rg_edit_b2a_base" rows="2">${escapeHtml(card.b2a.baseline || "")}</textarea>
+                    <label>定位 <span class="rg-hint">切换式。当前应对模式。用 / 号连接的引导性短语。</span></label>
+                    <textarea id="rg_edit_b2a_pos" rows="2">${escapeHtml(card.b2a.position || "")}</textarea>
+                    <label>互动：</label>
+                    <textarea id="rg_edit_b2a_int" rows="2">${escapeHtml(card.b2a.interaction || "")}</textarea>
+                    <label>近况：</label>
+                    <textarea id="rg_edit_b2a_rec" rows="2">${escapeHtml(card.b2a.recent || "")}</textarea>
                 </div>
+
                 <div class="rg-form-row">
                     <label>注入深度（@D）：</label>
                     <input type="number" id="rg_edit_depth" value="${card.depth}" min="0" max="20" style="width:60px">
                     <label>触发概率：</label>
                     <input type="number" id="rg_edit_prob" value="${card.probability}" min="0" max="100" style="width:60px">%
                 </div>
+
                 <div class="rg-token-preview">预估 token：<span id="rg_token_count">0</span></div>
+
                 <div class="rg-modal-footer">
                     <button class="menu_button" id="rg_btn_card_save">保存</button>
                     <button class="menu_button" id="rg_btn_card_cancel">取消</button>
@@ -553,12 +655,14 @@ function openCardEditor(cardId) {
             dimension: $("#rg_edit_dimension").val(),
             infoGap: $("#rg_edit_infoGap").val(),
             a2b: {
-                cognition: $("#rg_edit_a2b_cog").val(),
+                baseline: $("#rg_edit_a2b_base").val(),
+                position: $("#rg_edit_a2b_pos").val(),
                 interaction: $("#rg_edit_a2b_int").val(),
                 recent: $("#rg_edit_a2b_rec").val(),
             },
             b2a: {
-                cognition: $("#rg_edit_b2a_cog").val(),
+                baseline: $("#rg_edit_b2a_base").val(),
+                position: $("#rg_edit_b2a_pos").val(),
                 interaction: $("#rg_edit_b2a_int").val(),
                 recent: $("#rg_edit_b2a_rec").val(),
             },
@@ -583,12 +687,14 @@ function openCardEditor(cardId) {
             dimension: $("#rg_edit_dimension").val().trim(),
             infoGap: $("#rg_edit_infoGap").val(),
             a2b: {
-                cognition: $("#rg_edit_a2b_cog").val(),
+                baseline: $("#rg_edit_a2b_base").val(),
+                position: $("#rg_edit_a2b_pos").val(),
                 interaction: $("#rg_edit_a2b_int").val(),
                 recent: $("#rg_edit_a2b_rec").val(),
             },
             b2a: {
-                cognition: $("#rg_edit_b2a_cog").val(),
+                baseline: $("#rg_edit_b2a_base").val(),
+                position: $("#rg_edit_b2a_pos").val(),
                 interaction: $("#rg_edit_b2a_int").val(),
                 recent: $("#rg_edit_b2a_rec").val(),
             },
@@ -607,10 +713,11 @@ function openCardEditor(cardId) {
 }
 
 // ============================================================
-// 入口
+// 入口：把面板挂到扩展菜单
 // ============================================================
 
 jQuery(async () => {
+    // 在扩展设置区添加一个折叠面板
     const settingsHtml = `
         <div id="rg_extension_settings">
             <div class="inline-drawer">
@@ -629,6 +736,7 @@ jQuery(async () => {
     `;
     $("#extensions_settings2").append(settingsHtml);
 
+    // 切换角色卡 / 切换聊天时重新渲染
     if (typeof eventSource !== "undefined" && event_types?.CHAT_CHANGED) {
         eventSource.on(event_types.CHAT_CHANGED, () => {
             renderUI();
